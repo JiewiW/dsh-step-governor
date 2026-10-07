@@ -1,0 +1,9 @@
+# dsh-step-governor bundle patch: mount the experimental step-governor plugin.
+#
+# Host half only. Registers two waterfall decision hooks:
+#   agent/pre-step    -> {kind:"reject"} G1 step-level circuit breaker
+#   tools/pre-execute -> {kind:"deny"}   G2 branch circuit breaker
+# Deterministic signals only; fails open; shadow mode by default.
+- insert:
+    - id: dsh-step-governor
+      name: dsh-step-governor

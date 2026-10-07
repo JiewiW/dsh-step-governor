@@ -1,0 +1,42 @@
+{
+  "name": "dsh-step-governor",
+  "version": "0.0.1-experimental",
+  "description": "实验：确定性步数治理——agent/pre-step reject 步级熔断与 tools/pre-execute deny 支线熔断（shadow 先行，fail-open）",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "dsh-plugin",
+    "governor",
+    "circuit-breaker"
+  ],
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh": ">=0.1.5-rc.1 <0.2.0 || >=0.2.0-rc.1 <0.3.0-0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JiewiW/dsh-step-governor.git"
+  },
+  "homepage": "https://github.com/JiewiW/dsh-step-governor#readme",
+  "bugs": {
+    "url": "https://github.com/JiewiW/dsh-step-governor/issues"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,35 @@
+# 依赖与构建产物
+node_modules/
+*.tgz
+
+# 本机备份文件（修改前自动生成，不应进版本库）
+*.bak-*
+*.orig-*
+*.bak
+
+# 本机开发残留：历史快照与一次性批处理脚本
+_pre-harvest-snapshot/
+batch-review-*.ps1
+
+# 本机故障复盘/维护记录：含绝对路径、PID、实例地址等仅本机可见的信息，
+# 属内部维护材料，不随仓库公开。
+*-20261005.md
+*-rootcause-*.md
+*-复盘与维护手册-*.md
+
+# 采集与诊断产物（若被误放到包目录下）
+debug-events.jsonl
+
+# 营销文案（非发布材料，仅本机留存）
+docs/*-xiaohongshu-post.md
+
+# 编辑器与系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+node_modules/
+smoke-*.log
+smoke-*.pid
+smoke-*.err
