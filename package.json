@@ -1,7 +1,7 @@
 {
   "name": "dsh-step-governor",
-  "version": "0.0.1-experimental",
-  "description": "实验：确定性步数治理——agent/pre-step reject 步级熔断与 tools/pre-execute deny 支线熔断（shadow 先行，fail-open）",
+  "version": "0.1.0",
+  "description": "确定性步数治理——agent/pre-step reject 步级熔断与 tools/pre-execute deny 支线熔断（shadow 先行，fail-open）",
   "keywords": [
     "dsh",
     "deepseek-harness",
@@ -11,6 +11,9 @@
   ],
   "type": "module",
   "main": "lib/index.js",
+  "scripts": {
+    "test": "node --test test/services.test.mjs test/payloads.test.mjs test/settings.test.mjs test/test-governor-logic.mjs test/test-integration.mjs"
+  },
   "exports": {
     ".": "./lib/index.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
