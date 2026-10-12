@@ -1,6 +1,11 @@
 // 被 test-integration.mjs 在子进程调用：装载 apply() 到伪 ctx，
 // 用真实事件序列驱动 G1/G2，输出钩子的实际决策。
-import { apply } from "../lib/index.js";
+// P0-6 隔离：强制独立临时 SETTINGS_PATH，禁止直读真实 storages json。
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+process.env.DSH_GOVERNOR_SETTINGS_PATH = process.env.DSH_GOVERNOR_SETTINGS_PATH
+	|| join(tmpdir(), `gov-int-${process.pid}-${Date.now()}.json`);
+const { apply } = await import("../lib/index.js");
 
 const logs = [];
 console.warn = (...args) => {
@@ -32,7 +37,7 @@ async function failedCall(n) {
 	const callId = `c${n}`;
 	await ev("tool/call", { step: n, callId, name: KEY.name, arguments: KEY.arguments });
 	await ctx.emit("tools/pre-execute", { name: KEY.name, arguments: KEY.arguments, agent: { session } });
-	await ev("tool/result", { step: n, message: { callId, isError: true, content: "Error: boom" } });
+	await ev("tool/result", { step: n, message: { role: "tool", source: { kind: "tool", callId }, toolCallId: callId, isError: true, content: "Error: boom" } });
 }
 await failedCall(1);
 await failedCall(2);
@@ -46,7 +51,7 @@ async function zeroStep(step, callId) {
 	await ev("step/start", { turn: 1, step });
 	await ev("assistant/message", { turn: 1, step, message: { content: [{ type: "reasoning", text: `thinking ${step}` }] } });
 	await ev("tool/call", { turn: 1, step, callId, name: "read", arguments: { file_path: `/z/${step}.js` } });
-	await ev("tool/result", { turn: 1, step, message: { callId, isError: true, content: "Error: 401" } });
+	await ev("tool/result", { turn: 1, step, message: { role: "tool", source: { kind: "tool", callId }, toolCallId: callId, isError: true, content: "Error: 401" } });
 }
 // pre-step 钩子需要在每次 step/start 后征询；坏 payload 分支触发 fail-open。
 let g1Decision = "next";

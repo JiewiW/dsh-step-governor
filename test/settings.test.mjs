@@ -52,21 +52,27 @@ async function callPost(handler, payload) {
 	return { status: res.status, body: JSON.parse(res.body) };
 }
 
-test("GET 返回 10 项设置 + schema + persisted 状态", async () => {
+test("GET 返回 13 项设置 + schema + persisted 状态", async () => {
 	const ctx = createCtx(); apply(ctx);
 	const { status, body } = await callGet(route(ctx));
 	assert.equal(status, 200);
 	assert.equal(body.ok, true);
-	assert.equal(body.schema.length, 10, "schema 共 10 项");
-	assert.equal(Object.keys(body.settings).length, 10, "settings 共 10 项");
+	assert.equal(body.schema.length, 13, "schema 共 13 项");
+	assert.equal(Object.keys(body.settings).length, 13, "settings 共 13 项");
 	for (const k of ["mode", "g1aZeroSteps", "g1bFingerprintSteps", "g1cMaxStepsPerTurn", "g2aSameTargetCalls",
-		"g2bConsecutiveFailures", "g1MaxAutoResume", "g1AutoResumeSwitchAction", "notifyChannels", "maxSessions"]) {
+		"g2bConsecutiveFailures", "g1MaxAutoResume", "g1AutoResumeSwitchAction", "notifyChannels", "maxSessions",
+		"g1aWindowSize", "g1aSuccessRatioMax", "g1aReasoningMin"]) {
 		assert.ok(k in body.settings, `缺少 ${k}`);
 	}
 	assert.equal(body.settings.mode, "shadow");
 	assert.equal(body.settings.g1MaxAutoResume, 3);
 	assert.equal(body.settings.g1AutoResumeSwitchAction, true);
 	assert.equal(body.persisted, false, "文件不存在 → 未持久化");
+	// P1-19：g1g2 标注 experimental，schema 透传给 UI 渲染强制档警示。
+	const modeSpec = body.schema.find((s) => s.key === "mode");
+	assert.ok(modeSpec.experimentalOptions && modeSpec.experimentalOptions.includes("g1g2"),
+		"mode schema 缺 experimentalOptions");
+	assert.ok((modeSpec.experimentalNote || "").length > 0, "mode schema 缺 experimentalNote");
 });
 
 test("POST clamp + 非法回退 + 未知键丢弃 + 持久化落盘", async () => {
@@ -101,7 +107,7 @@ test("损坏文件回退默认并标记 persisted=false", async () => {
 	process.env.DSH_GOVERNOR_SETTINGS_PATH = pathA;
 });
 
-test("env 作启动初值；设置卡保存后覆盖 env（§9.3）", async () => {
+test("env 作启动初值；env 显式设过的键持久化不得覆盖（P0-6 env>json>默认）", async () => {
 	process.env.DSH_GOVERNOR_G1A_N = "5";
 	process.env.DSH_GOVERNOR_MODE = "g2b";
 	process.env.DSH_GOVERNOR_SETTINGS_PATH = pathC;
@@ -109,13 +115,33 @@ test("env 作启动初值；设置卡保存后覆盖 env（§9.3）", async () =
 	const g1 = await callGet(route(ctx));
 	assert.equal(g1.body.settings.g1aZeroSteps, 5, "env 初值");
 	assert.equal(g1.body.settings.mode, "g2b", "env 模式");
-	await callPost(route(ctx), { settings: { mode: "shadow" } }); // 保存 → 覆盖 env
-	ctx = createCtx(); apply(ctx); // 重新装配（模拟重启）
+	await callPost(route(ctx), { settings: { mode: "shadow", g1aZeroSteps: 9 } }); // 保存 → 尝试覆盖 env
+	// envOwnedKeys：env 显式设过的键（mode/g1a）持久化时原值保留（g2b/5），
+	// 其余键（g1bFingerprintSteps 等）照常保存。确认持久化 json 已落盘。
+	const onDiskC = JSON.parse(readFileSync(pathC, "utf8"));
+	assert.equal(onDiskC.mode, "g2b", "env 拥有的键持久化保留 env 值");
+	assert.equal(onDiskC.g1aZeroSteps, 5, "env 拥有的键持久化保留 env 值");
+	assert.equal(onDiskC.g1bFingerprintSteps, 6, "非 env 拥有的键照常持久化");
+	// env 仍为 g2b/5。重新装配（模拟重启）后：env 优先 → 仍是 g2b/5（而非 json 的 shadow/9）。
+	ctx = createCtx(); apply(ctx);
 	const g2 = await callGet(route(ctx));
-	assert.equal(g2.body.settings.mode, "shadow", "持久化覆盖 env");
-	assert.equal(g2.body.settings.g1aZeroSteps, 5, "未覆盖项仍取 env 初值");
+	assert.equal(g2.body.settings.mode, "g2b", "env 优先：持久化 mode 不覆盖 env");
+	assert.equal(g2.body.settings.g1aZeroSteps, 5, "env 优先：持久化 g1a 不覆盖 env");
 	delete process.env.DSH_GOVERNOR_G1A_N;
 	delete process.env.DSH_GOVERNOR_MODE;
+	process.env.DSH_GOVERNOR_SETTINGS_PATH = pathA;
+});
+
+test("未设 env 时持久化照常生效（json>默认）", async () => {
+	// 上一个测试落盘的 pathC：mode=g2b, g1a=5（env 拥有键保留值），g1bFingerprintSteps=6。
+	delete process.env.DSH_GOVERNOR_G1A_N;
+	delete process.env.DSH_GOVERNOR_MODE;
+	process.env.DSH_GOVERNOR_SETTINGS_PATH = pathC;
+	const ctx = createCtx(); apply(ctx);
+	const g = await callGet(route(ctx));
+	assert.equal(g.body.settings.mode, "g2b", "无 env：持久化值生效");
+	assert.equal(g.body.settings.g1aZeroSteps, 5, "无 env：持久化 g1a 生效");
+	assert.equal(g.body.settings.g1bFingerprintSteps, 6, "无 env：持久化 g1b 生效");
 	process.env.DSH_GOVERNOR_SETTINGS_PATH = pathA;
 });
 

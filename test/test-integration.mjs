@@ -1,16 +1,25 @@
 // 集成测试：用最小伪 cordis ctx 驱动 apply()，验证两个钩子的真实决策。
 // 通过子进程 + 不同 DSH_GOVERNOR_MODE 验证 shadow / g2b / g1g2 / 异常 fail-open。
+// P0-6 隔离：每次 run 强制独立临时 SETTINGS_PATH，与本机持久化 json 无关。
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const runner = join(here, "integrity-runner.mjs");
+const isoDir = mkdtempSync(join(tmpdir(), `gov-int-${process.pid}-`));
 
 function run(mode, extraEnv = {}) {
 	const out = execFileSync(process.execPath, [runner], {
 		encoding: "utf8",
-		env: { ...process.env, DSH_GOVERNOR_MODE: mode, ...extraEnv }
+		env: {
+			...process.env,
+			DSH_GOVERNOR_MODE: mode,
+			DSH_GOVERNOR_SETTINGS_PATH: join(isoDir, `settings-${mode}-${Object.keys(extraEnv).join("_") || "base"}.json`),
+			...extraEnv
+		}
 	});
 	return JSON.parse(out.trim().split("\n").pop());
 }

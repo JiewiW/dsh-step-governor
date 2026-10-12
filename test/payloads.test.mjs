@@ -5,7 +5,13 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 process.env.DSH_GOVERNOR_SETTINGS_PATH = join(tmpdir(), `gov-pl-${process.pid}-${Date.now()}.json`);
-const { apply, createSessionState, noteEvent, commitCall, evaluateG2, targetKey, BLOCK_CODES } = await import("../lib/index.js");
+const { apply, createSessionState, noteEvent, evaluateG2, targetKey, BLOCK_CODES, isSelfDenialResult } = await import("../lib/index.js");
+
+/** 真实 tool/result 形状（dsh-llm lib/types/message.js:92-100 + agent-loop :763-779）：
+ *  callId 在 message.source.callId / message.toolCallId；deny 标记在事件 data 顶层 error。 */
+function realResult(callId, extra = {}) {
+	return { message: { role: "tool", source: { kind: "tool", callId }, toolCallId: callId, ...extra } };
+}
 
 function createCtx() {
 	const handlers = new Map();
@@ -112,14 +118,29 @@ test("G2-B 自排除：自阻断结果不计 increment 也不 reset", async () =
 	const s = createSessionState();
 	const key = targetKey("pwsh", { command: "node fail.js" }); // 与 tool/call 派生的目标键一致
 	const RK = { name: "pwsh", arguments: { command: "node fail.js" } };
-	commitCall(s, key, { isError: true });
-	commitCall(s, key, { isError: true });
+	// 两次真实失败（isError=true）经事件路径计数：pre-execute（+calls）→ tool/result（consecutiveFail）
+	for (const [callId, seq] of [["f1", 1], ["f2", 2]]) {
+		noteEvent(s, { type: "tool/call", data: { callId, ...RK } });
+		const rec = s.toolTargets.get(key) || { calls: 0, consecutiveFail: 0 };
+		rec.calls += 1; // 等价于 pre-execute 对放行调用的计数
+		s.toolTargets.set(key, rec);
+		noteEvent(s, { type: "tool/result", data: realResult(callId, { isError: true, content: `Error: ${seq}` }) });
+	}
 	noteEvent(s, { type: "tool/call", data: { callId: "x1", ...RK } });
-	noteEvent(s, { type: "tool/result", data: { message: { callId: "x1", isError: true, error: { info: { plugin: "dsh-step-governor", rule: "G2-B" } } } } });
-	assert.equal(evaluateG2(s, key).detail.consecutiveFail, 2, "自阻断不计 increment");
+	// 真实形状自阻断：deny 标记在事件 data 顶层 error（P0-5①）
+	noteEvent(s, { type: "tool/result", data: { ...realResult("x1", { isError: true, content: "Error: denied" }), error: { message: "denied", info: { plugin: "dsh-step-governor", rule: "G2-B" } } } });
+	assert.equal(evaluateG2(s, key).detail.consecutiveFail, 2, "自阻断不计 increment，也不清零");
 	noteEvent(s, { type: "tool/call", data: { callId: "x2", ...RK } });
-	noteEvent(s, { type: "tool/result", data: { message: { callId: "x2", isError: true, content: "Error: real" } } });
+	noteEvent(s, { type: "tool/result", data: realResult("x2", { isError: true, content: "Error: real" }) });
 	assert.equal(evaluateG2(s, key).detail.consecutiveFail, 3, "真实失败照常计数");
+
+	// 错误形状负对照（P0-5③）：历史版本读 message 层，标记藏 message 内、data 无顶层 error → 必须认不出
+	// （真实契约中 deny 标记只在 data 顶层 error —— 见 isSelfDenialResult 文档）
+	assert.equal(isSelfDenialResult({ message: { role: "tool", source: { kind: "tool", callId: "n1" }, toolCallId: "n1", isError: true, error: { info: { plugin: "dsh-step-governor", rule: "G2-B" } } } }), false,
+		"错误契约形状（标记在 message 内、data 无顶层 error）不得被识别为自我阻断");
+	// 真实形状：标记在事件 data 顶层 error → 识别成功
+	assert.equal(isSelfDenialResult({ ...realResult("n2", { isError: true }), error: { info: { plugin: "dsh-step-governor", rule: "G2-B" } } }), true,
+		"真实形状（标记在 data 顶层 error）必须被识别");
 
 	// 钩子路径：g2b 模式下 2 次真实失败 → deny；自阻断结果到达后再次发起仍 deny（未被 reset）
 	process.env.DSH_GOVERNOR_MODE = "g2b";
@@ -130,12 +151,13 @@ test("G2-B 自排除：自阻断结果不计 increment 也不 reset", async () =
 	for (const callId of ["c1", "c2"]) {
 		await ev("tool/call", { callId, ...KEY2 });
 		await ctx.emit("tools/pre-execute", { ...KEY2, agent: { session: sess } });
-		await ev("tool/result", { message: { callId, isError: true, content: "Error: boom" } });
+		await ev("tool/result", realResult(callId, { isError: true, content: "Error: boom" }));
 	}
 	assert.equal((await ctx.emit("tools/pre-execute", { ...KEY2, agent: { session: sess } }))?.code, "g2b-consecutive-failure");
-	await ev("tool/result", { message: { callId: "c3", isError: true, error: { info: { plugin: "dsh-step-governor", rule: "G2-B" } } } });
+	await ev("tool/result", { ...realResult("c3", { isError: true, content: "Error: denied" }), error: { message: "denied", info: { plugin: "dsh-step-governor", rule: "G2-B" } } });
 	assert.equal((await ctx.emit("tools/pre-execute", { ...KEY2, agent: { session: sess } }))?.code, "g2b-consecutive-failure", "自阻断未 reset，继续 deny");
 	ctx.restore();
+	delete process.env.DSH_GOVERNOR_MODE;
 });
 
 test("soft-cut 预算抑制升级：高置信类→下一边界 reject（g1b 码），每 turn 一次", async () => {
