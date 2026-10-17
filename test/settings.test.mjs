@@ -52,16 +52,16 @@ async function callPost(handler, payload) {
 	return { status: res.status, body: JSON.parse(res.body) };
 }
 
-test("GET 返回 13 项设置 + schema + persisted 状态", async () => {
+test("GET 返回 14 项设置 + schema + persisted 状态", async () => {
 	const ctx = createCtx(); apply(ctx);
 	const { status, body } = await callGet(route(ctx));
 	assert.equal(status, 200);
 	assert.equal(body.ok, true);
-	assert.equal(body.schema.length, 13, "schema 共 13 项");
-	assert.equal(Object.keys(body.settings).length, 13, "settings 共 13 项");
+	assert.equal(body.schema.length, 14, "schema 共 14 项");
+	assert.equal(Object.keys(body.settings).length, 14, "settings 共 14 项");
 	for (const k of ["mode", "g1aZeroSteps", "g1bFingerprintSteps", "g1cMaxStepsPerTurn", "g2aSameTargetCalls",
 		"g2bConsecutiveFailures", "g1MaxAutoResume", "g1AutoResumeSwitchAction", "notifyChannels", "maxSessions",
-		"g1aWindowSize", "g1aSuccessRatioMax", "g1aReasoningMin"]) {
+		"g1aWindowSize", "g1aSuccessRatioMax", "g1aReasoningMin", "g1aUnproductiveSteps"]) {
 		assert.ok(k in body.settings, `缺少 ${k}`);
 	}
 	assert.equal(body.settings.mode, "shadow");

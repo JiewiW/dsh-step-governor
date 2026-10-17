@@ -55,17 +55,21 @@ async function zeroStep(step, callId) {
 }
 // pre-step 钩子需要在每次 step/start 后征询；坏 payload 分支触发 fail-open。
 let g1Decision = "next";
+let g1SoftStopped = false;
 const N = Number(process.env.DSH_GOVERNOR_G1A_N || 4);
 if (process.env.GOVERNOR_BAD_PAYLOAD === "1") {
 	// 坏 payload（null）使 handler 内取值抛错 → fail-open：当次必须放行。
 	const d = await ctx.emit("agent/pre-step", null);
 	g1Decision = d?.kind === "reject" ? "reject" : "next";
 } else {
-	for (let step = 1; step <= N + 1; step++) {
+	// 软停语义（2026-10-17）：首次命中投递收尾指令（kind=enter + messages），
+	// 模型若无视、同一 turn 再命中才硬拦。循环必须留出"第二次命中"的机会。
+	for (let step = 1; step <= N + 3; step++) {
 		const d = await ctx.emit("agent/pre-step", { turn: 1, step, agent: { session } });
+		if (Array.isArray(d?.messages) && d.messages.length > 0) g1SoftStopped = true;
 		if (d?.kind === "reject") { g1Decision = "reject"; break; }
 		await zeroStep(step, `z${step}`);
 	}
 }
 
-console.log(JSON.stringify({ loaded: logs.some((l) => l.at === "loaded"), g2Decision, g2Reason, g1Decision, logs }));
+console.log(JSON.stringify({ loaded: logs.some((l) => l.at === "loaded"), g2Decision, g2Reason, g1Decision, g1SoftStopped, logs }));

@@ -47,10 +47,11 @@ function check(label, cond, extra = "") {
 	check("g2b G1 仍放行（影子）", r.g1Decision === "next", r.g1Decision);
 }
 
-// 3. g1g2：G1-A reject 生效（小阈值 G1A_N=2，便于 3 步内触发）
+// 3. g1g2：G1-A 先软停、同一 turn 再犯才 reject（小阈值 G1A_N=2，便于数步内触发）
 {
 	const r = run("g1g2", { DSH_GOVERNOR_G1A_N: "2" });
-	check("g1g2 G1 reject", r.g1Decision === "reject", r.g1Decision);
+	check("g1g2 G1 先软停（投递收尾指令）", r.g1SoftStopped === true, String(r.g1SoftStopped));
+	check("g1g2 无视指令后再 reject", r.g1Decision === "reject", r.g1Decision);
 }
 
 // 4. fail-open：pre-step 回调内抛错时放行（runner 用坏 payload 触发）

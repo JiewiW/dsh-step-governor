@@ -58,11 +58,19 @@ test("G1-A reject 载荷：冻结码 + autoResume 默认 {max:3,switchAction:tru
 	await ev("assistant/message", { turn: 1, step: 2, message: { content: [{ type: "reasoning", text: "t2" }] } });
 	await ev("tool/result", { step: 2, message: { callId: "b", isError: true, content: "Error: 401" } });
 	const d = await ctx.emit("agent/pre-step", { turn: 1, step: 3, agent: { session: s } });
-	assert.equal(d?.kind, "reject");
-	assert.equal(d?.code, "g1a-zero-delivery");
-	assert.deepEqual(d?.autoResume, { max: 3, switchAction: true });
-	assert.equal(typeof d?.evidenceSeq, "number");
-	assert.ok(typeof d?.reason === "string" && d.reason.length > 0);
+	// 2026-10-17 根治静默中断：首次命中改为"软停"——投递收尾指令让模型自己总结结束，
+	// 不再把 turn 直接掐成 {"kind":"blocked"}。
+	assert.notEqual(d?.kind, "reject", "首次命中不得直接终止 turn");
+	assert.equal(d?.kind, "enter");
+	const notice = (d?.messages ?? []).find((m) => JSON.stringify(m).includes("收尾边界"));
+	assert.ok(notice, "软停必须向模型投递可见的收尾指令");
+	// 同一 turn 再命中（模型无视指令仍在调工具）才硬拦，并保留冻结码。
+	const d2 = await ctx.emit("agent/pre-step", { turn: 1, step: 4, agent: { session: s } });
+	assert.equal(d2?.kind, "reject");
+	assert.equal(d2?.code, "g1a-zero-delivery");
+	assert.deepEqual(d2?.autoResume, { max: 3, switchAction: true });
+	assert.equal(typeof d2?.evidenceSeq, "number");
+	assert.ok(typeof d2?.reason === "string" && d2.reason.length > 0);
 	ctx.restore();
 	delete process.env.DSH_GOVERNOR_G1A_N;
 });
@@ -77,8 +85,10 @@ test("G1-C 冻结码 g1c-turn-limit", async () => {
 	await ev("step/start", { turn: 1, step: 1 });
 	await ev("step/start", { turn: 1, step: 2 });
 	const d = await ctx.emit("agent/pre-step", { turn: 1, step: 3, agent: { session: s } });
-	assert.equal(d?.kind, "reject");
-	assert.equal(d?.code, "g1c-turn-limit");
+	assert.notEqual(d?.kind, "reject", "G1-C 首次命中同样先软停");
+	const d2 = await ctx.emit("agent/pre-step", { turn: 1, step: 4, agent: { session: s } });
+	assert.equal(d2?.kind, "reject");
+	assert.equal(d2?.code, "g1c-turn-limit");
 	ctx.restore();
 	delete process.env.DSH_GOVERNOR_G1C_MAX;
 });

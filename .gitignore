@@ -33,3 +33,7 @@ node_modules/
 smoke-*.log
 smoke-*.pid
 smoke-*.err
+
+# 运行期报告与测试日志（不应入库）
+reports/
+

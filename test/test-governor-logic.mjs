@@ -40,6 +40,26 @@ check("pwsh 不同 -Filter→不同键（事故 §3.1 seq29/38）",
 check("C:/x 与 D:/x 跨盘符→不同键（Windows 不走 URL）",
 	targetKey("read", { file_path: "C:/x/foo.js" }) !== targetKey("read", { file_path: "D:/x/foo.js" }));
 
+// ── 变更类键（P1-16）：edit/write = 文件 + 变更语料哈希 ──
+check("edit 同文件不同 new_string→不同键（P1-16 误杀主因）",
+	targetKey("edit", { file_path: "/f.js", old_string: "a", new_string: "b" }) !==
+	targetKey("edit", { file_path: "/f.js", old_string: "a", new_string: "c" }));
+check("edit 同文件不同 old_string→不同键",
+	targetKey("edit", { file_path: "/f.js", old_string: "a", new_string: "b" }) !==
+	targetKey("edit", { file_path: "/f.js", old_string: "x", new_string: "b" }));
+check("edit 同参重试→同键",
+	targetKey("edit", { file_path: "/f.js", old_string: "a", new_string: "b" }) ===
+	targetKey("edit", { file_path: "/f.js", old_string: "a", new_string: "b" }));
+check("write 同文件不同 content→不同键",
+	targetKey("write", { file_path: "/f.js", content: "one" }) !==
+	targetKey("write", { file_path: "/f.js", content: "two" }));
+check("write 同参重试→同键",
+	targetKey("write", { file_path: "/f.js", content: "one" }) ===
+	targetKey("write", { file_path: "/f.js", content: "one" }));
+check("edit 与 write 同文件→不同键（语料域不同）",
+	targetKey("edit", { file_path: "/f.js", old_string: "", new_string: "one" }) !==
+	targetKey("write", { file_path: "/f.js", content: "one" }));
+
 // ── 失败签名 ──
 check("isError 识别", failureSignature({ isError: true }).error === true);
 check("成功正文含 401 不判失败（P0-4）", failureSignature({ content: "HTTP 401 Unauthorized" }).error === false);
@@ -123,13 +143,33 @@ check("正常结果非错误", failureSignature({ content: "ok 123" }).error ===
 	check("用户消息后 G1-A 清零", s.consecutiveZero === 0);
 }
 
+// ── G1-A 只读空转：连续成功但无交付（事故 session-7acba9a1 模式）──
+{
+	const s = createSessionState();
+	noteEvent(s, { type: "turn/start", data: { turn: 1 } });
+	let g1aUAt = 0;
+	let vDetail = null;
+	for (let step = 1; step <= CONFIG.g1aUnproductiveSteps + 1; step++) {
+		// 每步成功调只读工具、零文本、零文件变更——旧账目下这会清零 consecutiveZero
+		noteAssistantStep(s, { step, hasText: false, reasoning: "", successfulTool: true, fileChange: false });
+		const v = evaluateG1(s);
+		if (v.hit && v.rule === "G1-A" && v.detail.kind === "unproductive-read-loop") { g1aUAt = step; vDetail = v.detail; break; }
+	}
+	check("G1-A 只读空转 N 步命中", g1aUAt === CONFIG.g1aUnproductiveSteps, `at=${g1aUAt}`);
+	check("G1-A 只读空转判定带 kind 标记", vDetail && vDetail.kind === "unproductive-read-loop");
+	noteAssistantStep(s, { step: 99, hasText: true, reasoning: "delivered text", successfulTool: true, fileChange: false });
+	check("G1-A 有交付文本后空转账目清零", s.consecutiveUnproductive === 0);
+}
+
 // ── G1-B：同一指纹跨 K 步重现（且无文件变更）──
 {
 	const s = createSessionState();
 	noteEvent(s, { type: "turn/start", data: { turn: 1 } });
 	let g1bAt = 0;
 	for (let step = 1; step <= CONFIG.g1bFingerprintSteps + 1; step++) {
-		noteAssistantStep(s, { step, hasText: false, reasoning: "the kernel never marks in verbose mode so all branches miss", successfulTool: true, fileChange: false });
+		// hasText:true = 有交付，不触发 G1-A 只读空转判据（否则 G1-A 抢先命中）；
+		// 指纹账目只依赖 reasoning 文本，不受 hasText 影响。
+		noteAssistantStep(s, { step, hasText: true, reasoning: "the kernel never marks in verbose mode so all branches miss", successfulTool: true, fileChange: false });
 		const v = evaluateG1(s);
 		if (v.hit && v.rule === "G1-B") { g1bAt = step; break; }
 	}
