@@ -45,6 +45,23 @@ const g2d = await ctx.emit("tools/pre-execute", { name: KEY.name, arguments: KEY
 const g2Decision = g2d?.kind === "deny" ? "deny" : "next";
 const g2Reason = g2d?.reason || "";
 
+// ── P1-20：终态提交工具连续两次真实失败后，第三次仍须放行 ──
+// 这是 fusion 事故的最小复现：Worker 两次参数写错（区间超 80 行、区间条数超 12），
+// 若治理器把第三、四、五次也拦掉，外部工作流永远收不到提交 → 判 Worker 不可用
+// → 整个任务卡死。此处用真实事件序列驱动 pre-execute 钩子验证豁免生效。
+const SUB = { name: "fusion_submit_result", arguments: { summary: "同一份审计报告", status: "completed", sources: [{ path: "a.js", startLine: 1, endLine: 10 }] } };
+async function submitFailed(n) {
+	const callId = `s${n}`;
+	await ev("tool/call", { step: 10 + n, callId, name: SUB.name, arguments: SUB.arguments });
+	await ctx.emit("tools/pre-execute", { name: SUB.name, arguments: SUB.arguments, agent: { session } });
+	await ev("tool/result", { step: 10 + n, message: { role: "tool", source: { kind: "tool", callId }, toolCallId: callId, isError: true, content: "Error: Exploration source ranges require 1–80 lines each" } });
+}
+await submitFailed(1);
+await submitFailed(2);
+const subd = await ctx.emit("tools/pre-execute", { name: SUB.name, arguments: SUB.arguments, agent: { session } });
+const submitDecision = subd?.kind === "deny" ? "deny" : "next";
+const submitExemptLogged = logs.some((l) => l.action === "exempt" && l.terminalToolExempt === true);
+
 // ── G1-A：构造连续零推进步（无 text、工具全失败、无文件变更）──
 await ev("turn/start", { turn: 1 });
 async function zeroStep(step, callId) {
@@ -72,4 +89,4 @@ if (process.env.GOVERNOR_BAD_PAYLOAD === "1") {
 	}
 }
 
-console.log(JSON.stringify({ loaded: logs.some((l) => l.at === "loaded"), g2Decision, g2Reason, g1Decision, g1SoftStopped, logs }));
+console.log(JSON.stringify({ loaded: logs.some((l) => l.at === "loaded"), g2Decision, g2Reason, submitDecision, submitExemptLogged, g1Decision, g1SoftStopped, logs }));

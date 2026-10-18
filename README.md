@@ -30,8 +30,22 @@ step-governor 判得出：调用是否重复/失败、推理指纹是否重现�
 
 **G2 触发条件**：
 
-- **G2-A**：同一调用目标（归一化后的文件 / URL / 命令）尝试超过 3 次（`g2aSameTargetCalls`）。
+- **G2-A**：同一调用目标（归一化后的文件 / URL / 命令 / 参数）尝试超过 3 次（`g2aSameTargetCalls`）。
 - **G2-B**：同一目标连续失败 2 次（`g2bConsecutiveFailures`），与「同命令失败最多重试 2 次」纪律对齐。
+
+**目标键归一化**（决定 G2 的「同一目标」到底是什么）：
+
+| 工具 | 键体组成 |
+| --- | --- |
+| `read` | 文件路径 + `offset`/`limit`（分页即不同目标） |
+| `grep` | pattern + path |
+| `edit` / `write` | 文件路径 + 变更语料哈希（改内容即不同目标） |
+| `pwsh` / `bash` / `sh` | 管道首段的全部参数 + 后续段哈希 |
+| 其他工具 | 依次取 `file_path`/`path`/`url`/`command`/`pattern`/`script`/`query`/`name`；**这些字段一个都取不到时，回退到全参数规范化 JSON 的哈希** |
+
+最后那行兜底很关键：若键体退化为空串，同一工具下的所有调用会塌成同一个目标键（FNV-1a 空串恒为 `0x811c9dc5`），G2-B 一旦命中就永久拦截，改参数也无法脱身。
+
+**终态提交工具豁免**：工具名中含 `submit` / `report` / `finalize` / `finish` / `complete` / `deliver` / `accept` 词元的（如工作流编排的 `fusion_submit_result`），G2-A 与 G2-B **只观测不拦截**。理由是这类工具是外部工作流「本轮必须以它提交结果」的唯一出口，拦截它不会让模型换一条路，只会让外部编排永远读不到提交、进而判定该角色不可用、把一次可修正的参数错误升级成整任务死锁。防刷屏交给 G1-C 的回合步数上限。命中时仍写一条 `action:"exempt"` 的观测日志（无失败历史时不写，避免正常提交刷屏）。
 
 真人用户发来的新消息会重置全部计数（插件自己注入的消息不会）。
 
@@ -50,10 +64,10 @@ step-governor 判得出：调用是否重复/失败、推理指纹是否重现�
 ## 安装与配置
 
 ```sh
-dsh plugin --profile <你的profile> add github:JiewiW/dsh-step-governor#v0.1.1
+dsh plugin --profile <你的profile> add github:JiewiW/dsh-step-governor#v0.1.3
 ```
 
-host + client 双半边插件：加载后在 DSH 设置页出现「步数治理」卡片，13 项配置可直接改并持久化；也可用 `GET/POST /plugins/step-governor/settings` 读写（GET 返回完整 schema）。
+host + client 双半边插件：加载后在 DSH 设置页出现「步数治理」卡片，14 项配置可直接改并持久化；也可用 `GET/POST /plugins/step-governor/settings` 读写（GET 返回完整 schema）。
 
 环境变量只作为**启动初始值**，且优先级最高（env 显式设置的键，设置页保存不会覆盖）：
 

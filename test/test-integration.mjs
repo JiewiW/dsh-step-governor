@@ -45,6 +45,10 @@ function check(label, cond, extra = "") {
 	check("g2b G2-B deny", r.g2Decision === "deny", r.g2Decision);
 	check("g2b deny reason 非空", /G2-B/.test(r.g2Reason || ""));
 	check("g2b G1 仍放行（影子）", r.g1Decision === "next", r.g1Decision);
+	// P1-20 关键回归：同一会话里普通 pwsh 已被 G2-B 拦截，
+	// 但工作流终态提交工具连续失败两次后第三次仍必须放行。
+	check("g2b 终态提交工具不被 G2-B 拦截（P1-20 事故回归）", r.submitDecision === "next", r.submitDecision);
+	check("g2b 终态豁免落观测日志", r.submitExemptLogged === true, String(r.submitExemptLogged));
 }
 
 // 3. g1g2：G1-A 先软停、同一 turn 再犯才 reject（小阈值 G1A_N=2，便于数步内触发）

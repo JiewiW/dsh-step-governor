@@ -60,6 +60,66 @@ check("edit 与 write 同文件→不同键（语料域不同）",
 	targetKey("edit", { file_path: "/f.js", old_string: "", new_string: "one" }) !==
 	targetKey("write", { file_path: "/f.js", content: "one" }));
 
+// ── P1-21 未知工具的目标键兜底：参数进键体，改参数即换键 ──
+// 事故背景：fusion_submit_result 的参数是 {summary,status,unresolved,sources}，
+// 旧实现的字段清单（file_path/path/url/command/pattern/script/query/name）一个都取不到
+// → raw 恒为空串 → 八次调用全塌在同一个键 fusion_submit_result::#811c9dc5 上，
+// 改参数无法换键，G2-B 一旦命中就永久拦截。
+{
+	const submitA = targetKey("fusion_submit_result", { summary: "报告甲", status: "completed", sources: [{ path: "a.js", startLine: 1, endLine: 10 }] });
+	const submitB = targetKey("fusion_submit_result", { summary: "报告乙", status: "completed", sources: [{ path: "a.js", startLine: 1, endLine: 10 }] });
+	check("未知工具不同参数→不同键（P1-21）", submitA !== submitB, `${submitA} vs ${submitB}`);
+	check("未知工具键不再退化为空串哈希（P1-21）",
+		!submitA.endsWith("#811c9dc5") && !submitB.endsWith("#811c9dc5"), submitA);
+	check("未知工具同参数→同键（G2-B 语义保留）",
+		targetKey("fusion_submit_result", { summary: "报告甲", status: "completed", sources: [{ path: "a.js", startLine: 1, endLine: 10 }] }) === submitA);
+	check("未知工具键序无关（同参数不同书写顺序→同键）",
+		targetKey("x_tool", { a: 1, b: 2 }) === targetKey("x_tool", { b: 2, a: 1 }), targetKey("x_tool", { a: 1, b: 2 }));
+	check("未知工具空参数仍可算出键（不抛错）", typeof targetKey("x_tool", {}) === "string");
+}
+
+// ── P1-20 终态提交工具豁免：G2-B/G2-A 均只观测不拦截 ──
+// 该工具是外部工作流"本轮必须以它提交结果"的唯一出口，拦截它不会让模型换路，
+// 只会让工作流永远读不到提交 → 判该角色不可用 → 任务卡死。
+{
+	const s = createSessionState();
+	const key = targetKey("fusion_submit_result", { summary: "同一份报告", status: "completed" });
+	noteEvent(s, { type: "tool/call", data: { callId: "s1", name: "fusion_submit_result", arguments: { summary: "同一份报告", status: "completed" } } });
+	noteEvent(s, { type: "tool/result", data: { message: { source: { callId: "s1" }, toolCallId: "s1", isError: true } } });
+	noteEvent(s, { type: "tool/call", data: { callId: "s2", name: "fusion_submit_result", arguments: { summary: "同一份报告", status: "completed" } } });
+	noteEvent(s, { type: "tool/result", data: { message: { source: { callId: "s2" }, toolCallId: "s2", isError: true } } });
+	const rec = s.toolTargets.get(key);
+	check("豁免前提：终态工具连续失败已计到阈值", !!rec && rec.consecutiveFail >= CONFIG.g2bConsecutiveFailures, JSON.stringify(rec));
+	const v = evaluateG2(s, key);
+	check("终态提交工具连续失败后不被 G2-B 拦截（P1-20）", !(v.hit && v.rule === "G2-B"), JSON.stringify(v.detail));
+	check("终态提交工具豁免带显式标记", v.detail.terminalToolExempt === true);
+	// 同一次判定里，普通工具仍按原语义拦截——豁免不能外溢。
+	const normalKey = targetKey("read", { file_path: "/same.js" });
+	const sn = createSessionState();
+	for (let i = 0; i < CONFIG.g2aSameTargetCalls; i++) {
+		evaluateG2(sn, normalKey);
+		const r = sn.toolTargets.get(normalKey) || { calls: 0, consecutiveFail: 0, recentCalls: [] };
+		r.recentCalls.push(sn.globalStepSeq);
+		r.calls = r.recentCalls.length;
+		sn.toolTargets.set(normalKey, r);
+	}
+	const vn = evaluateG2(sn, normalKey);
+	check("豁免不外溢：普通工具 G2-A 照常命中", vn.hit && vn.rule === "G2-A", JSON.stringify(vn.detail));
+}
+
+// ── P1-20 豁免覆盖面：工作流各类终态工具都要被认出 ──
+{
+	/** 只取 detail 里的豁免标记，避免构造完整失败历史。 */
+	const exempt = (tool) => evaluateG2(createSessionState(), targetKey(tool, { a: 1 })).detail.terminalToolExempt === true;
+	check("豁免识别 fusion_submit_result", exempt("fusion_submit_result"));
+	check("豁免识别 fusion_finish_direct（Lead 收敛出口，同样不能拦）", exempt("fusion_finish_direct"));
+	check("豁免识别 fusion_review_gate_finalize", exempt("fusion_review_gate_finalize"));
+	check("豁免不误伤取证类工具 fusion_read_state", exempt("fusion_read_state") === false);
+	check("豁免不误伤取证类工具 fusion_review_result", exempt("fusion_review_result") === false);
+	check("豁免不误伤通用工具 read / write / pwsh",
+		exempt("read") === false && exempt("write") === false && exempt("pwsh") === false);
+}
+
 // ── 失败签名 ──
 check("isError 识别", failureSignature({ isError: true }).error === true);
 check("成功正文含 401 不判失败（P0-4）", failureSignature({ content: "HTTP 401 Unauthorized" }).error === false);
