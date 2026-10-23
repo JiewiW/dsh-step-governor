@@ -1,6 +1,6 @@
 {
   "name": "dsh-step-governor",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "确定性步数治理——agent/pre-step reject 步级熔断与 tools/pre-execute deny 支线熔断（shadow 先行，fail-open）",
   "keywords": [
     "dsh",
