@@ -1,0 +1,100 @@
+name: Publish to npm (OIDC)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_to_publish:
+        description: '已有 tag，workflow_dispatch 时指定'
+        required: true
+        type: string
+
+concurrency:
+  group: npm-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # 上传 GitHub Release asset
+  id-token: write   # OIDC trusted publishing 给 npm 发 token
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag
+        id: tag
+        env:
+          INPUT: ${{ github.event.inputs.tag_to_publish }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${INPUT}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          if ! echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "必须是稳定 tag vX.Y.Z: $TAG" >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tag
+        run: |
+          TAG='${{ steps.tag.outputs.tag }}'
+          git fetch origin "+refs/tags/${TAG}:refs/tags/${TAG}" --depth=1
+          git checkout --detach "refs/tags/${TAG}"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'      # npm 11.x 才支持 OIDC
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Verify tag matches package.json version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION='${{ steps.tag.outputs.tag }}'
+          TAG_VERSION="${TAG_VERSION#v}"
+          if [ "$TAG_VERSION" != "$VERSION" ]; then
+            echo "Tag $TAG_VERSION ≠ package.json $VERSION" >&2
+            exit 1
+          fi
+
+      - name: npm ci (如果有 lockfile)
+        run: if [ -f package-lock.json ]; then npm ci; elif [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; fi
+        continue-on-error: true
+
+      - name: Build (如果有脚本)
+        run: |
+          if grep -q '"build"' package.json; then npm run build; fi
+          if grep -q '"prepare"' package.json; then npm run prepare; fi
+
+      - name: Pack smoke-test
+        run: |
+          npm pack --dry-run
+          npm pack
+
+      # OIDC publish — 不需要 token，id-token: write 已经足够
+      - name: Publish to npm
+        run: npm publish --access public
+
+      - name: Create/update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在，跳过创建"
+          else
+            gh release create "$TAG" --title "$TAG"
+          fi
+          TARBALL=$(ls *.tgz | head -1)
+          if [ -f "$TARBALL" ]; then
+            gh release upload "$TAG" "$TARBALL" --clobber
+          fi
