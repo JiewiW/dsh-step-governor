@@ -1,0 +1,85 @@
+[
+  {
+    "name": "read",
+    "args": {
+      "file_path": "C:/x/y.txt",
+      "offset": 0,
+      "limit": 100
+    },
+    "key": "read::c#377e16ec"
+  },
+  {
+    "name": "read",
+    "args": {
+      "file_path": "D:\\a\\b.txt"
+    },
+    "key": "read::d#f86427a2"
+  },
+  {
+    "name": "grep",
+    "args": {
+      "pattern": "foo",
+      "path": "D:\\src"
+    },
+    "key": "grep::foo#c1a84ea3"
+  },
+  {
+    "name": "grep",
+    "args": {
+      "pattern": "foo bar"
+    },
+    "key": "grep::foo#45c122aa"
+  },
+  {
+    "name": "edit",
+    "args": {
+      "file_path": "D:\\f.txt",
+      "old_string": "a",
+      "new_string": "b"
+    },
+    "key": "edit::d#b0c09913"
+  },
+  {
+    "name": "write",
+    "args": {
+      "file_path": "D:\\f.txt",
+      "content": "hello"
+    },
+    "key": "write::d#e783d341"
+  },
+  {
+    "name": "compress",
+    "args": {
+      "content": [
+        {
+          "startId": "m01185",
+          "endId": "m01207",
+          "summary": "s1"
+        }
+      ]
+    },
+    "key": "compress::#d5308a70"
+  },
+  {
+    "name": "compress",
+    "args": {
+      "content": [
+        {
+          "startId": "m01185",
+          "endId": "m01207",
+          "summary": "s2 different"
+        }
+      ]
+    },
+    "key": "compress::#843d4beb"
+  },
+  {
+    "name": "compress",
+    "args": {
+      "startId": "m01185",
+      "endId": "m01207",
+      "topic": "t"
+    },
+    "key": "compress::#055d4004"
+  }
+]

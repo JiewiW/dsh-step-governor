@@ -64,15 +64,14 @@ test("GET 返回 14 项设置 + schema + persisted 状态", async () => {
 		"g1aWindowSize", "g1aSuccessRatioMax", "g1aReasoningMin", "g1aUnproductiveSteps"]) {
 		assert.ok(k in body.settings, `缺少 ${k}`);
 	}
-	assert.equal(body.settings.mode, "shadow");
+	assert.equal(body.settings.mode, "g1g2");
 	assert.equal(body.settings.g1MaxAutoResume, 3);
 	assert.equal(body.settings.g1AutoResumeSwitchAction, true);
 	assert.equal(body.persisted, false, "文件不存在 → 未持久化");
-	// P1-19：g1g2 标注 experimental，schema 透传给 UI 渲染强制档警示。
+	// 0.2.0 起默认档 g1g2（已非实验档），schema 不再带 experimentalOptions/Note。
 	const modeSpec = body.schema.find((s) => s.key === "mode");
-	assert.ok(modeSpec.experimentalOptions && modeSpec.experimentalOptions.includes("g1g2"),
-		"mode schema 缺 experimentalOptions");
-	assert.ok((modeSpec.experimentalNote || "").length > 0, "mode schema 缺 experimentalNote");
+	assert.ok(modeSpec && modeSpec.options.some((o) => o.value === "g1g2"),
+		"mode schema 缺 g1g2 选项");
 });
 
 test("POST clamp + 非法回退 + 未知键丢弃 + 持久化落盘", async () => {
@@ -102,7 +101,7 @@ test("损坏文件回退默认并标记 persisted=false", async () => {
 	const ctx = createCtx(); apply(ctx);
 	const { body } = await callGet(route(ctx));
 	assert.equal(body.persisted, false, "损坏 → 回退");
-	assert.equal(body.settings.mode, "shadow", "回退默认");
+	assert.equal(body.settings.mode, "g1g2", "回退默认");
 	assert.equal(body.settings.g1aZeroSteps, 4, "回退默认");
 	process.env.DSH_GOVERNOR_SETTINGS_PATH = pathA;
 });
