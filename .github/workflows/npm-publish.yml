@@ -68,7 +68,6 @@ jobs:
 
       - name: npm ci (如果有 lockfile)
         run: if [ -f package-lock.json ]; then npm ci; elif [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; fi
-        continue-on-error: true
 
       - name: Build (如果有脚本)
         run: |
@@ -82,14 +81,7 @@ jobs:
 
       # OIDC publish — 不需要 token，id-token: write 已经足够
       - name: Publish to npm
-        continue-on-error: true
         run: npm publish --access public
-
-      - name: Fix latest dist-tag
-        run: |
-          PKG=$(node -p "require('./package.json').name")
-          VER=$(node -p "require('./package.json').version")
-          npm dist-tag add "$PKG@$VER" latest
 
       - name: Create/update GitHub Release
         env:
@@ -105,4 +97,3 @@ jobs:
           if [ -f "$TARBALL" ]; then
             gh release upload "$TAG" "$TARBALL" --clobber
           fi
-
