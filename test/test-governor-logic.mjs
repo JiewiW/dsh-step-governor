@@ -20,6 +20,21 @@ check("同命令不同参数→不同键（P1-14 事故主因）",
 check("同命令首段同参数→同键（换管道后缀仍同目标）",
 	targetKey("pwsh", { command: "node t.js --x=1 | select -First 3" }) ===
 	targetKey("pwsh", { command: "node t.js --x=1; Get-Item x" }));
+check("cd 前缀后命令不同→不同键（&& 不切段）",
+	targetKey("pwsh", { command: "cd /d/trim && grep -n a f.m" }) !==
+	targetKey("pwsh", { command: "cd /d/trim && grep -n b f.m" }));
+check("cd 前缀同命令重试→同键",
+	targetKey("pwsh", { command: "cd /d/trim && grep -n a f.m" }) ===
+	targetKey("pwsh", { command: "cd /d/trim && grep -n a f.m" }));
+check("不同 cd 目录同命令→不同键",
+	targetKey("pwsh", { command: "cd /a && grep -n a f.m" }) !==
+	targetKey("pwsh", { command: "cd /b && grep -n a f.m" }));
+check("cd 用分号连接后命令不同→不同键",
+	targetKey("pwsh", { command: "cd /a; grep -n a f.m" }) !==
+	targetKey("pwsh", { command: "cd /a; grep -n b f.m" }));
+check("cd && echo && grep 链上真实命令不同→不同键",
+	targetKey("bash", { command: 'cd /d/trim && echo "=== A ===" && grep -n a f.m; echo; echo "=== B ==="' }) !==
+	targetKey("bash", { command: 'cd /d/trim && echo "=== C ===" && grep -n b f.m; echo; echo "=== D ==="' }));
 check("工具名不同→键不同",
 	targetKey("read", { file_path: "/a" }) !== targetKey("grep", { file_path: "/a" }));
 check("read 不同 offset→不同键（P1-14 分页键）",
@@ -176,6 +191,39 @@ check("正常结果非错误", failureSignature({ content: "ok 123" }).error ===
 	s.globalStepSeq += CONFIG.g1aWindowSize;
 	const v = evaluateG2(s, key);
 	check("G2-A 滑出窗后同目标放行（不拦截）", !(v.hit && v.rule === "G2-A"), JSON.stringify(v.detail));
+}
+
+// ── G2 账目按 turn 隔离：turn/start 与真人消息清空 recentCalls / 连续失败 / stall-2 ──
+{
+	const s = createSessionState();
+	const key = targetKey("pwsh", { command: "cd /d/trim && grep -n a f.m" });
+	const seed = () => s.toolTargets.set(key, {
+		calls: CONFIG.g2aSameTargetCalls,
+		consecutiveFail: 2,
+		recentCalls: [s.globalStepSeq, s.globalStepSeq]
+	});
+	seed();
+	const before = evaluateG2(s, key);
+	check("G2-B 跨 turn 前命中（基线）", before.hit && before.rule === "G2-B", JSON.stringify(before.detail));
+	noteEvent(s, { type: "turn/start", data: { turn: 1 } });
+	check("turn/start 清空 G2-A 滑窗账目（不跨 turn 带入）",
+		(s.toolTargets.get(key).recentCalls || []).length === 0,
+		JSON.stringify(s.toolTargets.get(key)));
+	check("turn/start 清空 G2-B 连续失败计数",
+		s.toolTargets.get(key).consecutiveFail === 0);
+	check("turn/start 后 G2 不再命中",
+		!evaluateG2(s, key).hit);
+	seed();
+	s.categoryDenials.push({ evidenceSeq: 0, ttlSteps: 20, expiresAtStep: 20, category: "read", categories: new Set(["read"]), reason: "test" });
+	noteEvent(s, { type: "turn/start", data: { turn: 2 } });
+	check("turn/start 清空 stall-2 类别禁用（不跨 turn 带入）", s.categoryDenials.length === 0);
+	noteEvent(s, { type: "user/message", data: { source: { kind: "user" } } });
+	const rec = s.toolTargets.get(key);
+	check("user/message 清空 recentCalls 与连续失败计数",
+		(rec.recentCalls || []).length === 0 && rec.consecutiveFail === 0);
+	s.categoryDenials.push({ evidenceSeq: 0, ttlSteps: 20, expiresAtStep: 20, category: "read", categories: new Set(["read"]), reason: "test" });
+	noteEvent(s, { type: "user/message", data: { source: { kind: "user" } } });
+	check("user/message 清空 stall-2 类别禁用", s.categoryDenials.length === 0);
 }
 
 // ── G1-A：连续硬零推进 N 步（直接驱动 noteAssistantStep，不经 step/start 结算）──
