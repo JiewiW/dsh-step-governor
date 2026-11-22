@@ -300,6 +300,26 @@ check("正常结果非错误", failureSignature({ content: "ok 123" }).error ===
 	check("G1-C 达到步数上限命中", v.hit && v.rule === "G1-C");
 }
 
+// ── G1-C：开关关闭后不再命中（G1-A/G1-B 不受影响）──
+{
+	const prev = CONFIG.g1cEnabled;
+	try {
+		CONFIG.g1cEnabled = false;
+		const s = createSessionState();
+		s.stepInTurn = CONFIG.g1cMaxStepsPerTurn + 50;
+		const v = evaluateG1(s);
+		check("g1cEnabled=false 时 G1-C 不命中", !(v.hit && v.rule === "G1-C"), `rule=${v.rule}`);
+		// 关闭 G1-C 不得连带关闭 G1-A：构造连续无交付状态。
+		const s2 = createSessionState();
+		s2.stepInTurn = 1;
+		s2.consecutiveZero = CONFIG.g1aZeroSteps;
+		const v2 = evaluateG1(s2);
+		check("g1cEnabled=false 时 G1-A 仍命中", v2.hit && v2.rule === "G1-A", `rule=${v2.rule}`);
+	} finally {
+		CONFIG.g1cEnabled = prev;
+	}
+}
+
 // ── spliced 注入（source.kind 非 user）不重置 ──
 {
 	const s = createSessionState();

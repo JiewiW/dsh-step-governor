@@ -39,7 +39,7 @@ DeepSeek Harness（DSH）插件。处理长任务里「想了很多步却不推�
 ## 安装与配置
 
 ```sh
-dsh plugin --profile <你的profile> add github:JiewiW/dsh-step-governor#v0.2.3
+dsh plugin --profile <你的profile> add github:JiewiW/dsh-step-governor#v0.3.0
 ```
 
 host + client 双半边插件。加载后在 DSH 设置页出现「步数治理」卡片，配置可直接修改并持久化；也可用 `GET/POST /plugins/step-governor/settings` 读写（GET 返回完整 schema）。环境变量可作启动初始值且优先级最高，键名与默认值见 `lib/index.js`。
@@ -50,6 +50,8 @@ host + client 双半边插件。加载后在 DSH 设置页出现「步数治理�
 - 「每步都成功、内容不重复、但整体偏离任务」属于语义级空转，本插件不覆盖。
 - 熔断只让模型更早带已有证据停手，不保证已交付内容正确。
 - 与 goal 自动续跑驱动并存时，pre-step 钩子的注册顺序仍属待核实项。
+- **通知渠道仅实现界面展示**：告警显示在会话头部徽标，其余渠道（看板 / Webhook / 即时通讯）尚未实现。
+- **启动检测只在会话有活动时触发**：空载实例不会因「无心跳」误报；宽限期默认 120 秒，可用 `DSH_GOVERNOR_WATCHDOG_GRACE_MS` 覆盖。
 
 阈值与放行条件经逐版装机实测确认，实现由 AI 协作完成。
 

@@ -26,9 +26,10 @@ function createCtx() {
 	};
 }
 function route(ctx) {
-	assert.equal(ctx.regs.length, 1, "设置路由未注册");
-	assert.equal(ctx.regs[0].path, "/plugins/step-governor/settings");
-	return ctx.regs[0].handler;
+	assert.equal(ctx.regs.length, 2, "设置路由 + 看门狗路由应各注册一条");
+	const settingsRoute = ctx.regs.find((r) => r.path === "/plugins/step-governor/settings");
+	assert.ok(settingsRoute, "设置路由未注册");
+	return settingsRoute.handler;
 }
 const fakeRes = () => {
 	const res = { status: 0, body: "" };
@@ -52,19 +53,26 @@ async function callPost(handler, payload) {
 	return { status: res.status, body: JSON.parse(res.body) };
 }
 
-test("GET 返回 14 项设置 + schema + persisted 状态", async () => {
+test("GET 返回 15 项设置 + schema + persisted 状态", async () => {
 	const ctx = createCtx(); apply(ctx);
 	const { status, body } = await callGet(route(ctx));
 	assert.equal(status, 200);
 	assert.equal(body.ok, true);
-	assert.equal(body.schema.length, 14, "schema 共 14 项");
-	assert.equal(Object.keys(body.settings).length, 14, "settings 共 14 项");
-	for (const k of ["mode", "g1aZeroSteps", "g1bFingerprintSteps", "g1cMaxStepsPerTurn", "g2aSameTargetCalls",
+	assert.equal(body.schema.length, 15, "schema 共 15 项");
+	assert.equal(Object.keys(body.settings).length, 15, "settings 共 15 项");
+	for (const k of ["mode", "g1aZeroSteps", "g1bFingerprintSteps", "g1cMaxStepsPerTurn", "g1cEnabled", "g2aSameTargetCalls",
 		"g2bConsecutiveFailures", "g1MaxAutoResume", "g1AutoResumeSwitchAction", "notifyChannels", "maxSessions",
 		"g1aWindowSize", "g1aSuccessRatioMax", "g1aReasoningMin", "g1aUnproductiveSteps"]) {
 		assert.ok(k in body.settings, `缺少 ${k}`);
 	}
 	assert.equal(body.settings.mode, "g1g2");
+	assert.equal(body.settings.g1cEnabled, true, "步数上限熔断默认开启");
+	// g1cEnabled 必须与 g1cMaxStepsPerTurn 同组并声明同行渲染。
+	const g1cEnableSpec = body.schema.find((s) => s.key === "g1cEnabled");
+	const g1cMaxSpec = body.schema.find((s) => s.key === "g1cMaxStepsPerTurn");
+	assert.ok(g1cEnableSpec && g1cEnableSpec.sameRowAs === "g1cMaxStepsPerTurn",
+		"g1cEnabled 缺 sameRowAs 声明，无法与步数上限同行");
+	assert.equal(g1cEnableSpec.group, g1cMaxSpec.group, "开关与步数上限必须同组");
 	assert.equal(body.settings.g1MaxAutoResume, 3);
 	assert.equal(body.settings.g1AutoResumeSwitchAction, true);
 	assert.equal(body.persisted, false, "文件不存在 → 未持久化");

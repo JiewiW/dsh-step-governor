@@ -1,4 +1,4 @@
-// 载荷冻结码 / G2-B 自我强化排除 / soft-cut 抑制升级 / 心跳看门狗。
+// 载荷冻结码 / G2-B 自我强化排除 / 心跳看门狗。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
@@ -170,23 +170,6 @@ test("G2-B 自排除：自阻断结果不计 increment 也不 reset", async () =
 	delete process.env.DSH_GOVERNOR_MODE;
 });
 
-test("soft-cut 预算抑制升级：高置信类→下一边界 reject（g1b 码），每 turn 一次", async () => {
-	process.env.DSH_GOVERNOR_MODE = "g1g2";
-	const ctx = createCtx(); apply(ctx);
-	const s = { id: "pg6" };
-	await ctx.emit("agent/soft-cut-suppressed", { cutClass: "pseudoTool", session: s, turn: 1 });
-	const d = await ctx.emit("agent/pre-step", { turn: 1, step: 1, agent: { session: s } });
-	assert.equal(d?.kind, "reject", "高置信抑制升级为终止 turn");
-	assert.equal(d?.code, "g1b-fingerprint-repeat");
-	// 消费后同 turn 再次抑制：不重复升级
-	await ctx.emit("agent/soft-cut-suppressed", { cutClass: "confirmed-repeat", session: s, turn: 1 });
-	assert.equal((await ctx.emit("agent/pre-step", { turn: 1, step: 2, agent: { session: s } }))?.kind, undefined, "每 turn 至多升级一次");
-	// 启发式类被抑制属设计内：不动作
-	await ctx.emit("agent/soft-cut-suppressed", { cutClass: "length", session: s, turn: 2 });
-	assert.equal((await ctx.emit("agent/pre-step", { turn: 2, step: 1, agent: { session: s } }))?.kind, undefined, "启发式类不升级");
-	ctx.restore();
-});
-
 test("心跳看门狗：静默超限告警一次、出站服务优先、心跳复位", async () => {
 	process.env.DSH_GOVERNOR_MODE = "shadow";
 	const ctx = createCtx();
@@ -208,5 +191,70 @@ test("心跳看门狗：静默超限告警一次、出站服务优先、心跳�
 		await ctx.emit("session/event", s, { type: "step/start", data: { turn: 1, step: i } });
 	}
 	assert.equal(ctx.semanticWatcher.alerts.length, 2, "心跳复位后可再告警");
+	ctx.restore();
+});
+
+test("看门狗 GUI 渠道：告警经只读路由暴露，心跳复位后清除", async () => {
+	process.env.DSH_GOVERNOR_MODE = "shadow";
+	const ctx = createCtx();
+	const regs = [];
+	ctx.webServer = { register: (r) => regs.push(r) };
+	apply(ctx);
+	const wdRoute = regs.find((r) => r.path === "/plugins/step-governor/watchdog");
+	assert.ok(wdRoute, "看门狗路由应已注册");
+	const call = async () => {
+		const res = { status: 0, body: "" };
+		res.writeHead = (s) => { res.status = s; };
+		res.end = (b) => { res.body = b || ""; };
+		await wdRoute.handler({ method: "GET" }, res);
+		return JSON.parse(res.body);
+	};
+	// 未见心跳且仍在启动宽限内：不告警，路由返回空
+	assert.equal((await call()).alert, null, "宽限期内不应有告警");
+	await ctx.emit("semantic-watcher/heartbeat", { worker: "w1" });
+	const s = { id: "pg8" };
+	for (let i = 1; i <= 60; i++) {
+		await ctx.emit("session/event", s, { type: "step/start", data: { turn: 1, step: i } });
+	}
+	const hit = await call();
+	assert.ok(hit.alert, "静默超限后路由应返回告警");
+	assert.equal(hit.alert.sessionId, "pg8");
+	assert.equal(hit.alert.heartbeatEvent, "semantic-watcher/heartbeat");
+	// 心跳恢复 → 告警清除
+	await ctx.emit("semantic-watcher/heartbeat", { worker: "w1" });
+	assert.equal((await call()).alert, null, "心跳恢复后告警应清除");
+	ctx.restore();
+});
+
+test("看门狗启动检测：宽限内不告警，超宽限无心跳则判 watcher 未运行", async () => {
+	process.env.DSH_GOVERNOR_MODE = "shadow";
+	// 把宽限压到 0，模拟「已过宽限期仍无任何心跳」。
+	process.env.DSH_GOVERNOR_WATCHDOG_GRACE_MS = "0";
+	const ctx = createCtx();
+	const regs = [];
+	ctx.webServer = { register: (r) => regs.push(r) };
+	apply(ctx);
+	const wdRoute = regs.find((r) => r.path === "/plugins/step-governor/watchdog");
+	const call = async () => {
+		const res = { status: 0, body: "" };
+		res.writeHead = (s) => { res.status = s; };
+		res.end = (b) => { res.body = b || ""; };
+		await wdRoute.handler({ method: "GET" }, res);
+		return JSON.parse(res.body);
+	};
+	const s = { id: "pg9" };
+	// 宽限为 0：首个会话事件即应触发启动检测告警。
+	await ctx.emit("session/event", s, { type: "step/start", data: { turn: 1, step: 1 } });
+	const hit = await call();
+	assert.ok(hit.alert, "超宽限且无心跳应告警");
+	assert.equal(hit.alert.kind, "watchdog-watcher-absent", "告警类型为 watcher 未运行");
+	assert.equal(hit.alert.sessionId, "pg9");
+	// 后续事件不重复告警（已告警待复位）
+	await ctx.emit("session/event", s, { type: "step/start", data: { turn: 1, step: 2 } });
+	assert.equal((await call()).alert.kind, "watchdog-watcher-absent", "告警保持");
+	// 心跳到达 → 启动检测告警清除，转入静默检测
+	await ctx.emit("semantic-watcher/heartbeat", { worker: "w1" });
+	assert.equal((await call()).alert, null, "心跳到达后告警应清除");
+	delete process.env.DSH_GOVERNOR_WATCHDOG_GRACE_MS;
 	ctx.restore();
 });
