@@ -258,3 +258,32 @@ test("看门狗启动检测：宽限内不告警，超宽限无心跳则判 watc
 	delete process.env.DSH_GOVERNOR_WATCHDOG_GRACE_MS;
 	ctx.restore();
 });
+
+test("看门狗双通道：derive-watcher 经 session/event 落盘的心跳也能复位告警", async () => {
+	process.env.DSH_GOVERNOR_MODE = "shadow";
+	process.env.DSH_GOVERNOR_WATCHDOG_GRACE_MS = "0";
+	const ctx = createCtx();
+	const regs = [];
+	ctx.webServer = { register: (r) => regs.push(r) };
+	apply(ctx);
+	const wdRoute = regs.find((r) => r.path === "/plugins/step-governor/watchdog");
+	const call = async () => {
+		const res = { status: 0, body: "" };
+		res.writeHead = (s) => { res.status = s; };
+		res.end = (b) => { res.body = b || ""; };
+		await wdRoute.handler({ method: "GET" }, res);
+		return JSON.parse(res.body);
+	};
+	const s = { id: "pg-dual-channel" };
+	// 宽限 0 + 无心跳：首个会话事件触发 watcher-absent 告警。
+	await ctx.emit("session/event", s, { type: "step/start", data: { turn: 1, step: 1 } });
+	assert.equal((await call()).alert.kind, "watchdog-watcher-absent", "无心跳应先告警");
+	// derive-watcher 的真实心跳路径：不走顶层 ctx.emit，而是经 session/event 落盘事件广播。
+	// 这正是线上误报的成因——本用例确保这条通道也能复位看门狗。
+	await ctx.emit("session/event", s, { type: "semantic-watcher/heartbeat", data: { worker: "w1" } });
+	const cleared = await call();
+	assert.equal(cleared.alert, null, "经 session/event 落盘的心跳应清除告警");
+	assert.ok(cleared.lastHeartbeatAt > 0, "lastHeartbeatAt 应被记录");
+	delete process.env.DSH_GOVERNOR_WATCHDOG_GRACE_MS;
+	ctx.restore();
+});

@@ -2,6 +2,15 @@
 
 本文件记录 dsh-step-governor 的所有重要变更。
 
+## [0.3.1] - 2026-11-26
+
+### 修复
+
+- **看门狗心跳双通道兼容**：修复「止损链路未运行」误报。derive-watcher 的心跳经 `session.append` 落盘、由 `session/event` 广播，而看门狗此前只订阅顶层 `ctx.on("semantic-watcher/heartbeat")`，两条通道不通，导致 watcher 实际正常运行却一条心跳都收不到，启动检测误判为 watcher 未运行。
+  - 抽出心跳复位统一入口 `noteWatchdogHeartbeat()`，顶层事件与 `session/event` 落盘心跳两条通道都汇聚到它。
+  - 在 `ctx.on("session/event")` 中识别 `event.type === "semantic-watcher/heartbeat"`，命中即复位看门狗并清除 GUI 告警（心跳不作为治理判据输入，不喂 `noteEvent`）。
+  - 新增回归测试「看门狗双通道：derive-watcher 经 session/event 落盘的心跳也能复位告警」。
+
 ## [0.3.0] - 2026-11-22
 
 ### 新增
